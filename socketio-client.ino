@@ -3,6 +3,7 @@
 #include <ESP8266WiFi.h>
 #include <SocketIoClient.h>
 #define USE_SERIAL Serial
+#include "ESPDateTime.h"
 
 SocketIoClient socketIO;
 
@@ -15,11 +16,13 @@ const char* password = "22022019"; //Enter Password
 const char* socketio_server_host = "10.1.1.110"; //Enter server adress
 const uint16_t socketio_server_port = 3005; // Enter server port
 
-const char* nameDevice = "arduQuarto";
+const char* nameDevice = "Quarto_esp01";
+const char* namePin = "Lampada";
 const int GPIO_0 = 0;
 
 void event(const char * payload, size_t length) {
   USE_SERIAL.printf("got message: %s\n", payload);
+  digitalWrite(GPIO_0,OFF);
 }
 
 void eventDisconnect(const char * payload, size_t length) {
@@ -34,7 +37,32 @@ void eventConnect(const char * payload, size_t length) {
 
 void createEvent(const char * payload, size_t length) {
   USE_SERIAL.printf("event: %s \n", payload);
+
+  StaticJsonDocument<200> doc;
+  deserializeJson(doc, payload);
+  if(doc["pinname"] == namePin && doc["name"] == nameDevice){
+    StaticJsonDocument<200> docDev;
+    JsonObject dev = docDev.to<JsonObject>();
+    dev["pinout"] = doc["id"];
+    
+    if(doc["command"] == "ON"){
+      digitalWrite(doc["number"],ON);
+      dev["realized"] = true;
+      dev["date_realized"] = DateTime.now();  
+    }else if(doc["command"] == "OFF"){
+      digitalWrite(doc["number"],OFF);
+      dev["realized"] = true;
+      dev["date_realized"] = DateTime.now();
+    }else{
+      dev["realized"] = false;
+      dev["date_realized"] = DateTime.now();
+    }
+    char output[200];
+    serializeJson(docDev, output);
   
+    USE_SERIAL.println(output);
+    socketIO.emit("realized", output);
+  }
 }
 
 void eventCreate(const char * payload, size_t length){
@@ -51,7 +79,7 @@ void eventCreate(const char * payload, size_t length){
   JsonArray pinOuts = docPin.to<JsonArray>();
   JsonObject pin1 = pinOuts.createNestedObject();
   pin1["pintype"] = "D";
-  pin1["name"] = "Lampada";
+  pin1["pinname"] = namePin;
   pin1["number"] = GPIO_0;
   pin1["type"] = "output";
   pin1["active"] = true;
@@ -68,7 +96,7 @@ void eventCreate(const char * payload, size_t length){
 
 void setup() {
   // put your setup code here, to run once:
-
+  
   USE_SERIAL.begin(115200);
 
   USE_SERIAL.setDebugOutput(true);
@@ -90,6 +118,9 @@ void setup() {
 
   pinMode(GPIO_0, OUTPUT);
   //digitalWrite(GPIO_0,OFF);
+
+  DateTime.setTimeZone(-4);
+  DateTime.begin();
 
   socketIO.on("connect", eventConnect);
   socketIO.on("disconnect", eventDisconnect);
